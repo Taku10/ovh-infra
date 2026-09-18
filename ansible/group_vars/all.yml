@@ -1,0 +1,7 @@
+---
+server_hostname: k3s-server
+
+admin_user: ubuntu
+admin_group: ubuntu
+admin_home: "/home/{{ admin_user }}"
+kubeconfig: "{{ admin_home }}/.kube/config"

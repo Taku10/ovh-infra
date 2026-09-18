@@ -1,1 +1,22 @@
-/ansible/.inventory.ini
+# Real Ansible inventories
+/ansible/inventory.ini
+/ansible/inventories/**/hosts.ini
+
+# Ansible-generated files
+*.retry
+
+# Ansible Vault password files
+.vault-password
+.vault-password.*
+
+# Environment files and credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Local editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

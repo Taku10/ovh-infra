@@ -1,0 +1,51 @@
+---
+- name: Check whether k3s is installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Install k3s
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | sh -
+  when: not k3s_binary.stat.exists
+
+- name: Ensure k3s is enabled and running
+  ansible.builtin.systemd:
+    name: k3s
+    enabled: true
+    state: started
+
+- name: Wait for Kubernetes API
+  ansible.builtin.command:
+    cmd: k3s kubectl get nodes
+  register: k3s_ready
+  retries: 30
+  delay: 5
+  until: k3s_ready.rc == 0
+  changed_when: false
+
+- name: Create admin kube directory
+  ansible.builtin.file:
+    path: "{{ admin_home }}/.kube"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_group }}"
+    mode: "0700"
+
+- name: Copy kubeconfig for admin user
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ kubeconfig }}"
+    remote_src: true
+    owner: "{{ admin_user }}"
+    group: "{{ admin_group }}"
+    mode: "0600"
+
+- name: Add KUBECONFIG to bashrc
+  ansible.builtin.lineinfile:
+    path: "{{ admin_home }}/.bashrc"
+    regexp: '^export KUBECONFIG='
+    line: 'export KUBECONFIG=$HOME/.kube/config'
+    state: present
+    owner: "{{ admin_user }}"
+    group: "{{ admin_group }}"

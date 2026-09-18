@@ -1,0 +1,21 @@
+---
+# Transitional role: move this installation to k3s-platform after its
+# Argo CD Application and Helm values are committed there.
+- name: Add Headlamp Helm repository
+  ansible.builtin.shell: |
+    helm repo add headlamp \
+      https://kubernetes-sigs.github.io/headlamp/ \
+      --force-update
+    helm repo update
+  become_user: "{{ admin_user }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Install Headlamp
+  ansible.builtin.shell: |
+    helm upgrade --install headlamp \
+      headlamp/headlamp \
+      --namespace kube-system
+  become_user: "{{ admin_user }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"

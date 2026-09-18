@@ -3,246 +3,26 @@
   hosts: k3s
   become: true
 
-  vars:
-    kubeconfig: /home/ubuntu/.kube/config
+  roles:
+    - role: common
+      tags: [common]
 
-  tasks:
+    - role: k3s
+      tags: [k3s]
 
-    # --------------------------------------------------
-    # Base system
-    # --------------------------------------------------
+    - role: helm
+      tags: [helm]
 
-    - name: Set hostname
-      ansible.builtin.hostname:
-        name: k3s-server
+    - role: argocd
+      tags: [argocd]
 
-    - name: Update apt cache
-      ansible.builtin.apt:
-        update_cache: true
-        cache_valid_time: 3600
+    # Transitional roles. These components will move to the k3s-platform
+    # GitOps repository after Argo CD applications are added there.
+    - role: headlamp
+      tags: [headlamp, platform]
 
-    - name: Install required packages
-      ansible.builtin.apt:
-        name:
-          - curl
-          - git
-          - jq
-          - unzip
-          - bash-completion
-          - ca-certificates
-        state: present
+    - role: monitoring
+      tags: [monitoring, platform]
 
-    # --------------------------------------------------
-    # k3s
-    # --------------------------------------------------
-
-    - name: Check whether k3s is installed
-      ansible.builtin.stat:
-        path: /usr/local/bin/k3s
-      register: k3s_binary
-
-    - name: Install k3s
-      ansible.builtin.shell: |
-        curl -sfL https://get.k3s.io | sh -
-      when: not k3s_binary.stat.exists
-
-    - name: Ensure k3s is enabled and running
-      ansible.builtin.systemd:
-        name: k3s
-        enabled: true
-        state: started
-
-    - name: Wait for Kubernetes API
-      ansible.builtin.command:
-        cmd: k3s kubectl get nodes
-      register: k3s_ready
-      retries: 30
-      delay: 5
-      until: k3s_ready.rc == 0
-      changed_when: false
-
-    # --------------------------------------------------
-    # kubectl / kubeconfig
-    # --------------------------------------------------
-
-    - name: Create ubuntu kube directory
-      ansible.builtin.file:
-        path: /home/ubuntu/.kube
-        state: directory
-        owner: ubuntu
-        group: ubuntu
-        mode: "0755"
-
-    - name: Copy kubeconfig for ubuntu user
-      ansible.builtin.copy:
-        src: /etc/rancher/k3s/k3s.yaml
-        dest: /home/ubuntu/.kube/config
-        remote_src: true
-        owner: ubuntu
-        group: ubuntu
-        mode: "0600"
-
-    - name: Add KUBECONFIG to bashrc
-      ansible.builtin.lineinfile:
-        path: /home/ubuntu/.bashrc
-        line: 'export KUBECONFIG=$HOME/.kube/config'
-        state: present
-        owner: ubuntu
-        group: ubuntu
-
-    # --------------------------------------------------
-    # Helm
-    # --------------------------------------------------
-
-    - name: Check whether Helm is installed
-      ansible.builtin.command:
-        cmd: helm version
-      register: helm_check
-      failed_when: false
-      changed_when: false
-
-    - name: Install Helm
-      ansible.builtin.shell: |
-        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-      when: helm_check.rc != 0
-
-    # --------------------------------------------------
-    # Argo CD
-    # --------------------------------------------------
-
-    - name: Create Argo CD namespace
-      ansible.builtin.shell: |
-        kubectl create namespace argocd \
-          --dry-run=client \
-          -o yaml | kubectl apply -f -
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-      changed_when: false
-
-    - name: Install Argo CD
-      ansible.builtin.shell: |
-        kubectl apply --server-side \
-          -n argocd \
-          -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-
-    # --------------------------------------------------
-    # Argo CD CLI
-    # --------------------------------------------------
-
-    - name: Set Argo CLI architecture for amd64
-      ansible.builtin.set_fact:
-        argocd_arch: amd64
-      when: ansible_architecture == "x86_64"
-
-    - name: Set Argo CLI architecture for arm64
-      ansible.builtin.set_fact:
-        argocd_arch: arm64
-      when: ansible_architecture in ["aarch64", "arm64"]
-
-    - name: Download Argo CD CLI
-      ansible.builtin.get_url:
-        url: "https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-{{ argocd_arch }}"
-        dest: /usr/local/bin/argocd
-        mode: "0755"
-
-    # --------------------------------------------------
-    # Headlamp
-    # --------------------------------------------------
-
-    - name: Add Headlamp Helm repository
-      ansible.builtin.shell: |
-        helm repo add headlamp \
-          https://kubernetes-sigs.github.io/headlamp/ \
-          --force-update
-        helm repo update
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-
-    - name: Install Headlamp
-      ansible.builtin.shell: |
-        helm upgrade --install headlamp \
-          headlamp/headlamp \
-          --namespace kube-system
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-
-    # --------------------------------------------------
-    # Prometheus + Grafana
-    # --------------------------------------------------
-
-    - name: Add Prometheus community Helm repository
-      ansible.builtin.shell: |
-        helm repo add prometheus-community \
-          https://prometheus-community.github.io/helm-charts \
-          --force-update
-        helm repo update
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-
-    - name: Create monitoring namespace
-      ansible.builtin.shell: |
-        kubectl create namespace monitoring \
-          --dry-run=client \
-          -o yaml | kubectl apply -f -
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-      changed_when: false
-
-    - name: Install Prometheus CRDs separately
-      ansible.builtin.shell: |
-        helm show crds prometheus-community/kube-prometheus-stack \
-          | kubectl apply \
-              --server-side \
-              --request-timeout=5m \
-              -f -
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-
-    - name: Install Prometheus and Grafana
-      ansible.builtin.shell: |
-        helm upgrade --install monitoring \
-          prometheus-community/kube-prometheus-stack \
-          --namespace monitoring \
-          --skip-crds \
-          --timeout 15m \
-          --set alertmanager.enabled=false
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-
-    # --------------------------------------------------
-    # Verification
-    # --------------------------------------------------
-
-    - name: Show Kubernetes nodes
-      ansible.builtin.command:
-        cmd: kubectl get nodes
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-      register: nodes
-      changed_when: false
-
-    - name: Display nodes
-      ansible.builtin.debug:
-        var: nodes.stdout_lines
-
-    - name: Show all pods
-      ansible.builtin.command:
-        cmd: kubectl get pods -A
-      become_user: ubuntu
-      environment:
-        KUBECONFIG: "{{ kubeconfig }}"
-      register: pods
-      changed_when: false
-
-    - name: Display pods
-      ansible.builtin.debug:
-        var: pods.stdout_lines
+    - role: verify
+      tags: [verify]

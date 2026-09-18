@@ -1,0 +1,33 @@
+---
+- name: Create Argo CD namespace
+  ansible.builtin.shell: |
+    kubectl create namespace argocd \
+      --dry-run=client \
+      -o yaml | kubectl apply -f -
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  changed_when: false
+
+- name: Install Argo CD
+  ansible.builtin.shell: |
+    kubectl apply --server-side \
+      -n argocd \
+      -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Set Argo CD CLI architecture
+  ansible.builtin.set_fact:
+    argocd_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+  when: ansible_architecture in ["x86_64", "aarch64", "arm64"]
+
+- name: Fail on unsupported Argo CD CLI architecture
+  ansible.builtin.fail:
+    msg: "Unsupported architecture: {{ ansible_architecture }}"
+  when: ansible_architecture not in ["x86_64", "aarch64", "arm64"]
+
+- name: Download Argo CD CLI
+  ansible.builtin.get_url:
+    url: "https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-{{ argocd_arch }}"
+    dest: /usr/local/bin/argocd
+    mode: "0755"

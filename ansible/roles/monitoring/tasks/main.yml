@@ -1,0 +1,45 @@
+---
+# Transitional role: move this installation to k3s-platform after its
+# Argo CD Application and Helm values are committed there.
+- name: Add Prometheus community Helm repository
+  ansible.builtin.shell: |
+    helm repo add prometheus-community \
+      https://prometheus-community.github.io/helm-charts \
+      --force-update
+    helm repo update
+  become_user: "{{ admin_user }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Create monitoring namespace
+  ansible.builtin.shell: |
+    kubectl create namespace monitoring \
+      --dry-run=client \
+      -o yaml | kubectl apply -f -
+  become_user: "{{ admin_user }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+  changed_when: false
+
+- name: Install Prometheus CRDs separately
+  ansible.builtin.shell: |
+    helm show crds prometheus-community/kube-prometheus-stack \
+      | kubectl apply \
+          --server-side \
+          --request-timeout=5m \
+          -f -
+  become_user: "{{ admin_user }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
+
+- name: Install Prometheus and Grafana
+  ansible.builtin.shell: |
+    helm upgrade --install monitoring \
+      prometheus-community/kube-prometheus-stack \
+      --namespace monitoring \
+      --skip-crds \
+      --timeout 15m \
+      --set alertmanager.enabled=false
+  become_user: "{{ admin_user }}"
+  environment:
+    KUBECONFIG: "{{ kubeconfig }}"
